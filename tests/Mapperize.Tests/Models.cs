@@ -64,3 +64,44 @@ public class Person
 }
 
 public record PersonRecord(int Id, string Name);
+
+// ---- nullable complex-struct models (X/Y as fields to exercise field mapping) ----
+public struct Point
+{
+    public int X;
+    public int Y;
+}
+
+public struct PointDto
+{
+    public int X;
+    public int Y;
+}
+
+public class HasPoint
+{
+    public Point? Location { get; set; }
+}
+
+public class HasPointDto
+{
+    public PointDto? Location { get; set; }
+}
+
+// ---- init-only target (update methods must not assign init-only members) ----
+public class InitTarget
+{
+    public int Id { get; init; }
+    public string Name { get; set; } = "";
+}
+
+// ---- dictionary models ----
+public class Catalog
+{
+    public Dictionary<string, Order> Items { get; set; } = new();
+}
+
+public class CatalogDto
+{
+    public Dictionary<string, OrderDto> Items { get; set; } = new();
+}

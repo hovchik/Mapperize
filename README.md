@@ -78,6 +78,87 @@ UserDto dto = mapper.ToDto(user);
 That’s it. `Address` and `Orders` are discovered and mapped automatically — you don’t need to
 declare a method for every nested type (though you can, and it will be reused).
 
+## Usage styles
+
+A mapper is just a `partial` type with `partial` methods, so you can wire it into your code in
+whatever way reads best — you are not limited to a single instance-method-on-an-attributed-class
+pattern.
+
+```csharp
+// 1. Instance methods (shown above)
+var dto = new UserMapper().ToDto(user);
+
+// 2. Static methods — no instance to construct or inject
+[Mapper]
+public static partial class Maps
+{
+    public static partial UserDto ToDto(User user);
+}
+UserDto dto = Maps.ToDto(user);
+
+// 3. Extension methods — add `this` to the source parameter and call it fluently
+[Mapper]
+public static partial class Maps
+{
+    public static partial UserDto ToDto(this User user);
+}
+UserDto dto = user.ToDto();
+
+// 4. Update an existing instance — take the target as a second parameter
+[Mapper]
+public partial class UserMapper
+{
+    public partial void Update(User source, UserDto target);        // populate in place
+    public partial UserDto Merge(User source, UserDto target);      // …or return it for chaining
+}
+mapper.Update(user, existingDto);
+```
+
+Static and extension methods can live in a `static partial class`; update methods work in any
+mapper. All four styles share the same conversion engine (renames, nested objects, collections,
+enums, …). A mapper type may also be **nested inside another `partial` type**.
+
+## Dependency injection
+
+Mappers are plain classes, so you can inject them anywhere. If your project references
+`Microsoft.Extensions.DependencyInjection`, Mapperize generates an `AddMapperize()` extension that
+registers every mapper in the assembly — call it once in `Program.cs`:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+
+builder.Services.AddMapperize();                       // Singleton by default (mappers are stateless)
+// builder.Services.AddMapperize(ServiceLifetime.Scoped); // …or choose a lifetime
+```
+
+Then take the mapper as a constructor dependency:
+
+```csharp
+public class UsersController(UserMapper mapper)   // inject the concrete type…
+{
+    public UserDto Get(User user) => mapper.ToDto(user);
+}
+```
+
+To depend on (and mock) an **abstraction**, set `GenerateInterface = true`. Mapperize emits an
+`I{MapperName}` interface with the mapper's public instance methods, makes the mapper implement it,
+and registers the interface alongside the concrete type:
+
+```csharp
+[Mapper(GenerateInterface = true)]
+public partial class UserMapper
+{
+    public partial UserDto ToDto(User user);
+}
+// generated:  public interface IUserMapper { UserDto ToDto(User user); }
+
+public class UsersController(IUserMapper mapper) { /* … */ }   // inject the interface
+```
+
+The `AddMapperize()` extension is generated **only** when the DI package is referenced, so the
+core Mapperize package stays dependency-free for everyone else. The interface and the concrete type
+resolve to the same instance, so a `Singleton` mapper is shared between both.
+
 ### The generated code
 
 The generator emits ordinary, readable C# (simplified):
@@ -100,13 +181,22 @@ public partial UserDto ToDto(User user)
 
 ## Features
 
-- **Flat property mapping** by name (case-insensitive by default).
+- **Multiple usage styles** — instance, `static`, and extension methods, plus
+  map-into-an-existing-instance (`Update`) methods. See [Usage styles](#usage-styles).
+- **Dependency-injection ready** — a generated `services.AddMapperize()` registers every mapper,
+  and `GenerateInterface = true` emits an interface to inject/mock. See
+  [Dependency injection](#dependency-injection).
+- **Flat property mapping** by name (case-insensitive by default), across fields and properties.
 - **Renames** via `[MapProperty("Source", "Target")]`.
 - **Ignore** a target via `[MapperIgnoreTarget("Target")]`.
 - **Nested objects** — mapped recursively; helper methods are generated and de-duplicated.
 - **Collections** — `List<T>`, arrays, `HashSet<T>`, and the read-only/interface variants
   (`IEnumerable<T>`, `IReadOnlyList<T>`, `ICollection<T>`, …).
+- **Dictionaries** — `Dictionary<K,V>`, `IDictionary<K,V>`, `IReadOnlyDictionary<K,V>`; keys and
+  values are converted with the same engine.
 - **Enums** — by name (default, order-independent) or by value.
+- **Nested and static mapper types** — a `[Mapper]` type may itself be nested inside another
+  `partial` type, or be a `static partial class`.
 - **Nullable value types** — `int?` → `int` and back, handled safely.
 - **Numeric conversions** — implicit widening and explicit narrowing.
 - **Constructors & records** — positional records and constructor-only types are supported.
@@ -138,7 +228,7 @@ property **fail the build** — turning a whole class of silent runtime bugs int
 | `MPZ001` | A target member has no matching source member (warning or error). |
 | `MPZ002` | A source and target member exist but no conversion is possible.   |
 | `MPZ003` | A mapping method has an unsupported signature.                    |
-| `MPZ004` | The mapper type is generic or nested (not supported).             |
+| `MPZ004` | The mapper type (or an enclosing type) is generic or not `partial`. |
 
 ## Performance
 
@@ -187,13 +277,15 @@ dotnet test  -c Release          # run the xUnit suite
 dotnet run   -c Release --project samples/Mapperize.Sample   # runnable feature tour
 ```
 
+Per-case example projects live under [`samples/examples/`](samples/examples) — a minimal, runnable
+program for each usage style (instance, static, extension, update-in-place, dependency injection).
+
 ## Roadmap
 
 - User-defined member expressions / value converters
 - Flattening (`Order.Customer.Name` → `CustomerName`)
 - `before`/`after` mapping hooks
 - Deep-copy option for same-type nested references
-- Mapping to an existing instance (`void Update(Source, Target)`)
 
 Contributions welcome — see the issues on GitHub.
 

@@ -36,6 +36,16 @@ public sealed class MapperAttribute : Attribute
     /// <see cref="EnumMappingStrategy.ByName"/>.
     /// </summary>
     public EnumMappingStrategy EnumMappingStrategy { get; set; } = EnumMappingStrategy.ByName;
+
+    /// <summary>
+    /// When <c>true</c>, the generator also emits a public interface (<c>I{MapperName}</c>)
+    /// containing this mapper's public instance mapping methods and makes the mapper implement it.
+    /// This lets you depend on the abstraction (and mock it in tests). If a
+    /// <c>Microsoft.Extensions.DependencyInjection</c> reference is present, the generated
+    /// <c>AddMapperize</c> extension registers the interface alongside the concrete type.
+    /// Defaults to <c>false</c>. Ignored for <c>static</c> or nested mapper types.
+    /// </summary>
+    public bool GenerateInterface { get; set; } = false;
 }
 
 /// <summary>
