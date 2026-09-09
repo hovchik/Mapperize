@@ -14,12 +14,14 @@ internal sealed class Options
     public bool CaseInsensitive { get; private init; } = true;
     public UnmappedBehavior UnmappedBehavior { get; private init; } = UnmappedBehavior.Warn;
     public EnumStrategy EnumStrategy { get; private init; } = EnumStrategy.ByName;
+    public bool GenerateInterface { get; private init; }
 
     public static Options Read(AttributeData attr)
     {
         var caseInsensitive = true;
         var unmapped = UnmappedBehavior.Warn;
         var enumStrategy = EnumStrategy.ByName;
+        var generateInterface = false;
 
         foreach (var arg in attr.NamedArguments)
         {
@@ -34,6 +36,9 @@ internal sealed class Options
                 case "EnumMappingStrategy" when arg.Value.Value is int e:
                     enumStrategy = (EnumStrategy)e;
                     break;
+                case "GenerateInterface" when arg.Value.Value is bool gi:
+                    generateInterface = gi;
+                    break;
             }
         }
 
@@ -42,6 +47,7 @@ internal sealed class Options
             CaseInsensitive = caseInsensitive,
             UnmappedBehavior = unmapped,
             EnumStrategy = enumStrategy,
+            GenerateInterface = generateInterface,
         };
     }
 }

@@ -42,6 +42,12 @@ internal sealed class Emitter
     /// </summary>
     private bool _staticHelpers;
 
+    /// <summary>The simple name of the interface to generate (e.g. <c>IUserMapper</c>), or null.</summary>
+    private string? _interfaceName;
+
+    /// <summary>The public instance methods that make up the generated interface.</summary>
+    private List<UserMethod> _interfaceMethods = new();
+
     public Emitter(Compilation compilation, INamedTypeSymbol mapper, AttributeData mapperAttribute)
     {
         _compilation = compilation;
@@ -61,7 +67,7 @@ internal sealed class Emitter
         {
             _diagnostics.Add(Diagnostic.Create(Diagnostics.GenericMapperUnsupported,
                 _mapper.Locations.FirstOrDefault(), unsupportedReason));
-            return new MapperResult(hint, null, _diagnostics.ToImmutableArray());
+            return new MapperResult(hint, null, _diagnostics.ToImmutableArray(), null);
         }
 
         // 1. Discover user-declared partial mapping methods and register them as reusable maps.
@@ -90,9 +96,21 @@ internal sealed class Emitter
         }
 
         if (userMethods.Count == 0)
-            return new MapperResult(hint, null, _diagnostics.ToImmutableArray());
+            return new MapperResult(hint, null, _diagnostics.ToImmutableArray(), null);
 
         _staticHelpers = _mapper.IsStatic || userMethods.Any(m => m.IsStatic);
+
+        // An interface (for injection / mocking) is generated only for a non-static, top-level
+        // mapper that opted in and has at least one public instance mapping method.
+        if (_options.GenerateInterface && !_mapper.IsStatic && _mapper.ContainingType is null)
+        {
+            _interfaceMethods = userMethods
+                .Where(m => !m.IsStatic && !m.IsExtension
+                            && m.Accessibility == Microsoft.CodeAnalysis.Accessibility.Public)
+                .ToList();
+            if (_interfaceMethods.Count > 0)
+                _interfaceName = "I" + _mapper.Name;
+        }
 
         foreach (var m in userMethods)
             _pending.Enqueue(new MapJob(m.SourceType, m.TargetType, m.Name, m));
@@ -113,7 +131,22 @@ internal sealed class Emitter
         }
 
         var source = Wrap(bodies.ToString());
-        return new MapperResult(hint, source, _diagnostics.ToImmutableArray());
+
+        // A non-static mapper can be registered with a DI container. Static classes cannot.
+        MapperRegistration? registration = null;
+        if (!_mapper.IsStatic)
+        {
+            string? interfaceType = null;
+            if (_interfaceName is not null)
+            {
+                var ns = _mapper.ContainingNamespace;
+                var prefix = ns is { IsGlobalNamespace: false } ? ns.ToDisplayString() + "." : string.Empty;
+                interfaceType = "global::" + prefix + _interfaceName;
+            }
+            registration = new MapperRegistration(Display(_mapper), interfaceType);
+        }
+
+        return new MapperResult(hint, source, _diagnostics.ToImmutableArray(), registration);
     }
 
     /// <summary>
@@ -216,7 +249,14 @@ internal sealed class Emitter
             pad = new string(' ', indent * 4);
         }
 
-        sb.Append(pad).Append(TypeHeader(_mapper)).AppendLine();
+        // Emit the injectable interface (only generated for a non-nested mapper) alongside the class.
+        if (_interfaceName is not null)
+            EmitInterface(sb, pad);
+
+        sb.Append(pad).Append(TypeHeader(_mapper));
+        if (_interfaceName is not null)
+            sb.Append(" : ").Append(_interfaceName);
+        sb.AppendLine();
         sb.Append(pad).AppendLine("{");
         sb.Append(bodies);
         sb.Append(pad).AppendLine("}");
@@ -231,6 +271,24 @@ internal sealed class Emitter
         if (hasNs)
             sb.AppendLine("}");
         return sb.ToString();
+    }
+
+    /// <summary>Emits the injectable interface (<c>I{MapperName}</c>) the mapper implements.</summary>
+    private void EmitInterface(StringBuilder sb, string pad)
+    {
+        sb.Append(pad).Append(Accessibility(_mapper.DeclaredAccessibility)).Append(" interface ")
+          .Append(_interfaceName).AppendLine();
+        sb.Append(pad).AppendLine("{");
+        foreach (var m in _interfaceMethods)
+        {
+            sb.Append(pad).Append("    ").Append(Display(m.ReturnType)).Append(' ').Append(m.Name).Append('(')
+              .Append(Display(m.SourceType)).Append(' ').Append(m.ParameterName);
+            if (m.Kind == MapKind.Update)
+                sb.Append(", ").Append(Display(m.TargetType)).Append(' ').Append(m.TargetParameterName);
+            sb.AppendLine(");");
+        }
+        sb.Append(pad).AppendLine("}");
+        sb.AppendLine();
     }
 
     /// <summary>Emits e.g. <c>public static partial class Foo</c> for a (possibly enclosing) type.</summary>

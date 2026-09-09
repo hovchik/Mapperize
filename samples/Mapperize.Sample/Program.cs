@@ -1,4 +1,5 @@
 using Mapperize;
+using Microsoft.Extensions.DependencyInjection;
 
 // A runnable tour of Mapperize. Mapping code is generated at compile time — inspect it under
 // obj/.../generated. This program also acts as a runtime smoke test (exit code 1 on failure).
@@ -58,13 +59,21 @@ Check("update in place (same instance)", ReferenceEquals(updated, existing));
 Check("update in place (mapped value)", existing.Name == "Ada Lovelace");
 Check("update in place (ignore preserved)", existing.SecretNote == "keep-me");
 
+// 4. Dependency injection: register every mapper in one line, then resolve by interface.
+var provider = new ServiceCollection()
+    .AddMapperize()                 // generated extension — no reflection, no scanning
+    .BuildServiceProvider();
+var injected = provider.GetRequiredService<IAppMapper>();   // IAppMapper is generated too
+Check("DI: resolve mapper via interface", injected.ToDto(user).Name == "Ada Lovelace");
+
 Console.WriteLine(failures == 0 ? "\nAll checks passed." : $"\n{failures} check(s) FAILED.");
 return failures == 0 ? 0 : 1;
 
 // ---- mappers ---------------------------------------------------------------
 
-// The classic style: an instance mapper class.
-[Mapper]
+// The classic style: an instance mapper class. GenerateInterface also emits `IAppMapper`
+// (which this class implements) so it can be injected and mocked.
+[Mapper(GenerateInterface = true)]
 public partial class AppMapper
 {
     [MapProperty(nameof(User.FullName), nameof(UserDto.Name))]

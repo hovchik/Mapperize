@@ -118,6 +118,47 @@ Static and extension methods can live in a `static partial class`; update method
 mapper. All four styles share the same conversion engine (renames, nested objects, collections,
 enums, …). A mapper type may also be **nested inside another `partial` type**.
 
+## Dependency injection
+
+Mappers are plain classes, so you can inject them anywhere. If your project references
+`Microsoft.Extensions.DependencyInjection`, Mapperize generates an `AddMapperize()` extension that
+registers every mapper in the assembly — call it once in `Program.cs`:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+
+builder.Services.AddMapperize();                       // Singleton by default (mappers are stateless)
+// builder.Services.AddMapperize(ServiceLifetime.Scoped); // …or choose a lifetime
+```
+
+Then take the mapper as a constructor dependency:
+
+```csharp
+public class UsersController(UserMapper mapper)   // inject the concrete type…
+{
+    public UserDto Get(User user) => mapper.ToDto(user);
+}
+```
+
+To depend on (and mock) an **abstraction**, set `GenerateInterface = true`. Mapperize emits an
+`I{MapperName}` interface with the mapper's public instance methods, makes the mapper implement it,
+and registers the interface alongside the concrete type:
+
+```csharp
+[Mapper(GenerateInterface = true)]
+public partial class UserMapper
+{
+    public partial UserDto ToDto(User user);
+}
+// generated:  public interface IUserMapper { UserDto ToDto(User user); }
+
+public class UsersController(IUserMapper mapper) { /* … */ }   // inject the interface
+```
+
+The `AddMapperize()` extension is generated **only** when the DI package is referenced, so the
+core Mapperize package stays dependency-free for everyone else. The interface and the concrete type
+resolve to the same instance, so a `Singleton` mapper is shared between both.
+
 ### The generated code
 
 The generator emits ordinary, readable C# (simplified):
@@ -142,6 +183,9 @@ public partial UserDto ToDto(User user)
 
 - **Multiple usage styles** — instance, `static`, and extension methods, plus
   map-into-an-existing-instance (`Update`) methods. See [Usage styles](#usage-styles).
+- **Dependency-injection ready** — a generated `services.AddMapperize()` registers every mapper,
+  and `GenerateInterface = true` emits an interface to inject/mock. See
+  [Dependency injection](#dependency-injection).
 - **Flat property mapping** by name (case-insensitive by default), across fields and properties.
 - **Renames** via `[MapProperty("Source", "Target")]`.
 - **Ignore** a target via `[MapperIgnoreTarget("Target")]`.

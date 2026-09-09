@@ -15,6 +15,13 @@ All notable changes to this project are documented here. The format is based on
 - Mapper types may be **nested inside another `partial` type** and may be a `static partial class`.
 - **Dictionary mapping** for `Dictionary<K,V>`, `IDictionary<K,V>`, and `IReadOnlyDictionary<K,V>`
   (keys and values converted with the same engine).
+- **Dependency-injection support.** When the consumer references
+  `Microsoft.Extensions.DependencyInjection`, the generator emits a
+  `services.AddMapperize(ServiceLifetime lifetime = Singleton)` extension that registers every
+  non-static mapper in the assembly. `[Mapper(GenerateInterface = true)]` additionally emits an
+  `I{MapperName}` interface (implemented by the mapper and registered alongside the concrete type)
+  so you can depend on the abstraction and mock it. The extension is only generated when the DI
+  package is present, so the core package remains dependency-free.
 
 ### Fixed
 - Nullable complex structs (e.g. `Point?` → `PointDto?`) now preserve `null` instead of mapping a
