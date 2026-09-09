@@ -5,6 +5,13 @@
   <Folder Name="/samples/">
     <Project Path="samples/Mapperize.Sample/Mapperize.Sample.csproj" />
   </Folder>
+  <Folder Name="/samples/examples/">
+    <Project Path="samples/examples/Example.Instance/Example.Instance.csproj" />
+    <Project Path="samples/examples/Example.Static/Example.Static.csproj" />
+    <Project Path="samples/examples/Example.Extension/Example.Extension.csproj" />
+    <Project Path="samples/examples/Example.Update/Example.Update.csproj" />
+    <Project Path="samples/examples/Example.DependencyInjection/Example.DependencyInjection.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Mapperize.Generator/Mapperize.Generator.csproj" />
     <Project Path="src/Mapperize/Mapperize.csproj" />

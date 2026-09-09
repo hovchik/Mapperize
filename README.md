@@ -277,6 +277,9 @@ dotnet test  -c Release          # run the xUnit suite
 dotnet run   -c Release --project samples/Mapperize.Sample   # runnable feature tour
 ```
 
+Per-case example projects live under [`samples/examples/`](samples/examples) — a minimal, runnable
+program for each usage style (instance, static, extension, update-in-place, dependency injection).
+
 ## Roadmap
 
 - User-defined member expressions / value converters
