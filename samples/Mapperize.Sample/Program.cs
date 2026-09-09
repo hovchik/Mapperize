@@ -43,11 +43,27 @@ Check("null source -> null", mapper.ToDto(null!) is null);
 Check("record via constructor", mapper.ToRecord(new Person { Id = 99, Name = "Grace" }) is { Id: 99, Name: "Grace" });
 Check("top-level collection", mapper.ToDtos(new List<User> { user, user }).Count == 2);
 
+// Alternative usage styles ---------------------------------------------------
+
+// 1. Extension method: call it fluently on the source value.
+Check("extension method (order.ToDto())", user.Orders[0].ToDto().Id == 1);
+
+// 2. Static method: no instance required.
+Check("static method (Maps.ToOrder)", Maps.ToOrder(user.Orders[1]).Total == 100m);
+
+// 3. Update in place: populate an existing instance instead of allocating a new one.
+var existing = new UserDto { SecretNote = "keep-me" };
+var updated = mapper.Apply(user, existing);
+Check("update in place (same instance)", ReferenceEquals(updated, existing));
+Check("update in place (mapped value)", existing.Name == "Ada Lovelace");
+Check("update in place (ignore preserved)", existing.SecretNote == "keep-me");
+
 Console.WriteLine(failures == 0 ? "\nAll checks passed." : $"\n{failures} check(s) FAILED.");
 return failures == 0 ? 0 : 1;
 
-// ---- mapper ----------------------------------------------------------------
+// ---- mappers ---------------------------------------------------------------
 
+// The classic style: an instance mapper class.
 [Mapper]
 public partial class AppMapper
 {
@@ -58,6 +74,19 @@ public partial class AppMapper
     public partial List<UserDto> ToDtos(List<User> users);
 
     public partial PersonRecord ToRecord(Person person);
+
+    // Update style: map onto an existing target and return it (source, target) -> target.
+    [MapProperty(nameof(User.FullName), nameof(UserDto.Name))]
+    [MapperIgnoreTarget(nameof(UserDto.SecretNote))]
+    public partial UserDto Apply(User user, UserDto target);
+}
+
+// A static class of mapping methods: call them statically or as extension methods.
+[Mapper]
+public static partial class Maps
+{
+    public static partial OrderDto ToOrder(Order order);      // Maps.ToOrder(order)
+    public static partial OrderDto ToDto(this Order order);   // order.ToDto()
 }
 
 // ---- models ----------------------------------------------------------------

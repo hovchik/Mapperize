@@ -26,15 +26,16 @@ internal static class Diagnostics
     public static readonly DiagnosticDescriptor InvalidMapperMethod = new(
         id: "MPZ003",
         title: "Invalid mapper method",
-        messageFormat: "Mapping method '{0}' must be a non-generic partial instance method with exactly one parameter and a non-void return type",
+        messageFormat: "Mapping method '{0}' must be non-generic and either take one parameter and return the target (a transform), or take a source and a target parameter and return void or the target (an update)",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        isEnabledByDefault: true,
+        description: "Supported shapes are 'TTarget Map(TSource s)' and 'void Update(TSource s, TTarget t)' / 'TTarget Update(TSource s, TTarget t)'. Methods may be static and/or extension methods.");
 
     public static readonly DiagnosticDescriptor GenericMapperUnsupported = new(
         id: "MPZ004",
-        title: "Generic or nested mapper not supported",
-        messageFormat: "Mapper '{0}' must be a non-generic, top-level or namespace-level partial type",
+        title: "Unsupported mapper type",
+        messageFormat: "Mapper type '{0}' must be non-generic, and it and every type it is nested in must be declared 'partial'",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);

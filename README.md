@@ -78,6 +78,46 @@ UserDto dto = mapper.ToDto(user);
 That’s it. `Address` and `Orders` are discovered and mapped automatically — you don’t need to
 declare a method for every nested type (though you can, and it will be reused).
 
+## Usage styles
+
+A mapper is just a `partial` type with `partial` methods, so you can wire it into your code in
+whatever way reads best — you are not limited to a single instance-method-on-an-attributed-class
+pattern.
+
+```csharp
+// 1. Instance methods (shown above)
+var dto = new UserMapper().ToDto(user);
+
+// 2. Static methods — no instance to construct or inject
+[Mapper]
+public static partial class Maps
+{
+    public static partial UserDto ToDto(User user);
+}
+UserDto dto = Maps.ToDto(user);
+
+// 3. Extension methods — add `this` to the source parameter and call it fluently
+[Mapper]
+public static partial class Maps
+{
+    public static partial UserDto ToDto(this User user);
+}
+UserDto dto = user.ToDto();
+
+// 4. Update an existing instance — take the target as a second parameter
+[Mapper]
+public partial class UserMapper
+{
+    public partial void Update(User source, UserDto target);        // populate in place
+    public partial UserDto Merge(User source, UserDto target);      // …or return it for chaining
+}
+mapper.Update(user, existingDto);
+```
+
+Static and extension methods can live in a `static partial class`; update methods work in any
+mapper. All four styles share the same conversion engine (renames, nested objects, collections,
+enums, …). A mapper type may also be **nested inside another `partial` type**.
+
 ### The generated code
 
 The generator emits ordinary, readable C# (simplified):
@@ -100,13 +140,19 @@ public partial UserDto ToDto(User user)
 
 ## Features
 
-- **Flat property mapping** by name (case-insensitive by default).
+- **Multiple usage styles** — instance, `static`, and extension methods, plus
+  map-into-an-existing-instance (`Update`) methods. See [Usage styles](#usage-styles).
+- **Flat property mapping** by name (case-insensitive by default), across fields and properties.
 - **Renames** via `[MapProperty("Source", "Target")]`.
 - **Ignore** a target via `[MapperIgnoreTarget("Target")]`.
 - **Nested objects** — mapped recursively; helper methods are generated and de-duplicated.
 - **Collections** — `List<T>`, arrays, `HashSet<T>`, and the read-only/interface variants
   (`IEnumerable<T>`, `IReadOnlyList<T>`, `ICollection<T>`, …).
+- **Dictionaries** — `Dictionary<K,V>`, `IDictionary<K,V>`, `IReadOnlyDictionary<K,V>`; keys and
+  values are converted with the same engine.
 - **Enums** — by name (default, order-independent) or by value.
+- **Nested and static mapper types** — a `[Mapper]` type may itself be nested inside another
+  `partial` type, or be a `static partial class`.
 - **Nullable value types** — `int?` → `int` and back, handled safely.
 - **Numeric conversions** — implicit widening and explicit narrowing.
 - **Constructors & records** — positional records and constructor-only types are supported.
@@ -138,7 +184,7 @@ property **fail the build** — turning a whole class of silent runtime bugs int
 | `MPZ001` | A target member has no matching source member (warning or error). |
 | `MPZ002` | A source and target member exist but no conversion is possible.   |
 | `MPZ003` | A mapping method has an unsupported signature.                    |
-| `MPZ004` | The mapper type is generic or nested (not supported).             |
+| `MPZ004` | The mapper type (or an enclosing type) is generic or not `partial`. |
 
 ## Performance
 
@@ -193,7 +239,6 @@ dotnet run   -c Release --project samples/Mapperize.Sample   # runnable feature 
 - Flattening (`Order.Customer.Name` → `CustomerName`)
 - `before`/`after` mapping hooks
 - Deep-copy option for same-type nested references
-- Mapping to an existing instance (`void Update(Source, Target)`)
 
 Contributions welcome — see the issues on GitHub.
 

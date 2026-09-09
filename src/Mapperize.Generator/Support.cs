@@ -48,19 +48,44 @@ internal sealed class Options
 
 internal readonly record struct Rename(string Source, string Target);
 
+/// <summary>The shape of a user-declared partial mapping method.</summary>
+internal enum MapKind
+{
+    /// <summary>One source parameter; returns a freshly constructed target (<c>TDest ToDto(TSrc s)</c>).</summary>
+    Transform = 0,
+
+    /// <summary>Source parameter plus an existing target that is populated in place
+    /// (<c>void Update(TSrc s, TDest d)</c> or <c>TDest Update(TSrc s, TDest d)</c>).</summary>
+    Update = 1,
+}
+
 /// <summary>Metadata extracted from a user-declared partial mapping method.</summary>
 internal sealed class UserMethod
 {
     public string Name { get; init; } = string.Empty;
+    public MapKind Kind { get; init; } = MapKind.Transform;
     public ITypeSymbol SourceType { get; init; } = null!;
+
+    /// <summary>The declared return type (may be <c>void</c> for an update method).</summary>
     public ITypeSymbol ReturnType { get; init; } = null!;
+
+    /// <summary>The type mapped into: the return type for a transform, or the second parameter for an update.</summary>
+    public ITypeSymbol TargetType { get; init; } = null!;
+
     public string ParameterName { get; init; } = "source";
+
+    /// <summary>The name of the destination parameter for an <see cref="MapKind.Update"/> method.</summary>
+    public string? TargetParameterName { get; init; }
+
+    public bool ReturnsVoid { get; init; }
+    public bool IsStatic { get; init; }
+    public bool IsExtension { get; init; }
     public Accessibility Accessibility { get; init; }
     public List<Rename> Renames { get; init; } = new();
     public HashSet<string> Ignores { get; init; } = new();
     public Location? Location { get; init; }
 
-    public static UserMethod Read(IMethodSymbol method)
+    public static UserMethod Read(IMethodSymbol method, MapKind kind)
     {
         var renames = new List<Rename>();
         var ignores = new HashSet<string>();
@@ -82,12 +107,20 @@ internal sealed class UserMethod
             }
         }
 
+        var target = kind == MapKind.Update ? method.Parameters[1].Type : method.ReturnType;
+
         return new UserMethod
         {
             Name = method.Name,
+            Kind = kind,
             SourceType = method.Parameters[0].Type,
             ReturnType = method.ReturnType,
+            TargetType = target,
             ParameterName = method.Parameters[0].Name,
+            TargetParameterName = kind == MapKind.Update ? method.Parameters[1].Name : null,
+            ReturnsVoid = method.ReturnsVoid,
+            IsStatic = method.IsStatic,
+            IsExtension = method.IsExtensionMethod,
             Accessibility = method.DeclaredAccessibility,
             Renames = renames,
             Ignores = ignores,
