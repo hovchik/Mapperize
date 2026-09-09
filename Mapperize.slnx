@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Mapperize.Benchmarks/Mapperize.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Mapperize.Sample/Mapperize.Sample.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Mapperize.Generator/Mapperize.Generator.csproj" />
+    <Project Path="src/Mapperize/Mapperize.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Mapperize.Tests/Mapperize.Tests.csproj" />
+  </Folder>
+</Solution>

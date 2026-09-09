@@ -1,0 +1,29 @@
+## .NET
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+
+## Build / packaging output
+artifacts/
+*.nupkg
+*.snupkg
+
+## Generated files emitted for inspection
+**/generated/
+
+## BenchmarkDotNet
+BenchmarkDotNet.Artifacts/
+
+## OS
+.DS_Store
+Thumbs.db

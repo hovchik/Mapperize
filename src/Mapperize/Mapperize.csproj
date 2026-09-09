@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>Mapperize</PackageId>
+    <Title>Mapperize</Title>
+    <Description>A blazing-fast, compile-time, reflection-free object mapper for .NET powered by Roslyn source generators. A safer, faster, AOT/trim-friendly alternative to AutoMapper — mapping code is generated at build time, unmapped members are reported as diagnostics, and there is zero runtime startup cost.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeBuildOutput>true</IncludeBuildOutput>
+    <!-- The generator assembly ships inside this same package under analyzers/. -->
+    <SuppressDependenciesWhenPacking>false</SuppressDependenciesWhenPacking>
+    <DevelopmentDependency>false</DevelopmentDependency>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!-- Pack the source generator assembly into the analyzers folder so it runs in consumer builds. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Mapperize.Generator\Mapperize.Generator.csproj"
+                      PrivateAssets="all"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Target Name="_AddGeneratorToPackage" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Mapperize.Generator\Mapperize.Generator.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_GeneratorAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_GeneratorAssembly)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
+</Project>

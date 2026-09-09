@@ -1,0 +1,27 @@
+<Project>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+
+    <!-- Package identity / metadata (shared) -->
+    <Version>0.1.0</Version>
+    <Authors>Hovhannes Stepanyan</Authors>
+    <Company>Mapperize</Company>
+    <Product>Mapperize</Product>
+    <Copyright>Copyright (c) Mapperize contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/your-username/Mapperize</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/your-username/Mapperize</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>mapper;object-mapper;automapper;source-generator;mapping;dto;aot;performance;roslyn</PackageTags>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+</Project>

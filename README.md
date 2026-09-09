@@ -1,0 +1,202 @@
+# Mapperize
+
+**A blazing-fast, compile-time, reflection-free object mapper for .NET.**
+A safer, faster, AOT/trim-friendly alternative to AutoMapper — powered by a Roslyn source generator.
+
+[![CI](https://github.com/your-username/Mapperize/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/Mapperize/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/Mapperize.svg)](https://www.nuget.org/packages/Mapperize)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+---
+
+## Why Mapperize?
+
+Traditional mappers such as AutoMapper build mapping logic at **runtime** using reflection and
+compiled expression trees. That has three costs: a warm-up penalty, incompatibility with
+Native AOT / trimming, and — worst of all — **mistakes are only discovered at runtime**.
+
+Mapperize does the work at **compile time**. You declare `partial` mapping methods; the source
+generator writes the implementations as plain member assignments. What you ship is exactly the
+code you would have written by hand.
+
+|                        | AutoMapper                              | **Mapperize**                                   |
+| ---------------------- | --------------------------------------- | ----------------------------------------------- |
+| When mapping is built  | Runtime (reflection + expression trees) | **Compile time (source generator)**             |
+| Runtime reflection     | Yes                                     | **None**                                        |
+| Startup / warm-up cost | Yes (config + first-map JIT)            | **Zero**                                        |
+| Native AOT / trimming  | Fragile                                 | **Fully supported**                             |
+| Wrong/typo'd mappings  | Throw at runtime                        | **Reported at build time (diagnostics)**        |
+| Debuggable output      | Opaque delegates                        | **Readable generated C# you can step into**     |
+| Dependencies           | Several                                 | **Zero** (a single, dependency-free package)    |
+
+## Install
+
+```bash
+dotnet add package Mapperize
+```
+
+Targets `netstandard2.0`, so it works on .NET Framework 4.6.1+, .NET Core, and .NET 5–10.
+
+## Quick start
+
+```csharp
+using Mapperize;
+
+public class User
+{
+    public int Id { get; set; }
+    public string FullName { get; set; }
+    public int Age { get; set; }
+    public Address Address { get; set; }
+    public List<Order> Orders { get; set; }
+}
+
+public class UserDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; }       // renamed from FullName
+    public long Age { get; set; }          // widened automatically
+    public AddressDto Address { get; set; } // nested — mapped automatically
+    public List<OrderDto> Orders { get; set; }
+}
+
+[Mapper]
+public partial class UserMapper
+{
+    [MapProperty(nameof(User.FullName), nameof(UserDto.Name))]
+    public partial UserDto ToDto(User user);
+}
+```
+
+Usage:
+
+```csharp
+var mapper = new UserMapper();
+UserDto dto = mapper.ToDto(user);
+```
+
+That’s it. `Address` and `Orders` are discovered and mapped automatically — you don’t need to
+declare a method for every nested type (though you can, and it will be reused).
+
+### The generated code
+
+The generator emits ordinary, readable C# (simplified):
+
+```csharp
+public partial UserDto ToDto(User user)
+{
+    if (user is null) return default;
+    return new UserDto
+    {
+        Id = user.Id,
+        Name = user.FullName,
+        Age = user.Age,
+        Address = user.Address is null ? default : Map_1(user.Address),
+        Orders = user.Orders is null ? default
+            : System.Linq.Enumerable.ToList(System.Linq.Enumerable.Select(user.Orders, x => Map_2(x))),
+    };
+}
+```
+
+## Features
+
+- **Flat property mapping** by name (case-insensitive by default).
+- **Renames** via `[MapProperty("Source", "Target")]`.
+- **Ignore** a target via `[MapperIgnoreTarget("Target")]`.
+- **Nested objects** — mapped recursively; helper methods are generated and de-duplicated.
+- **Collections** — `List<T>`, arrays, `HashSet<T>`, and the read-only/interface variants
+  (`IEnumerable<T>`, `IReadOnlyList<T>`, `ICollection<T>`, …).
+- **Enums** — by name (default, order-independent) or by value.
+- **Nullable value types** — `int?` → `int` and back, handled safely.
+- **Numeric conversions** — implicit widening and explicit narrowing.
+- **Constructors & records** — positional records and constructor-only types are supported.
+- **Compile-time diagnostics** — unmapped members become build warnings (or errors, if you choose).
+- **Zero runtime dependencies** and **full Native AOT / trimming** support.
+
+## Configuration
+
+Everything is configured on the `[Mapper]` attribute:
+
+```csharp
+[Mapper(
+    CaseInsensitive = true,                               // match member names ignoring case (default)
+    UnmappedMemberBehavior = UnmappedMemberBehavior.Warn, // Ignore | Warn (default) | Error
+    EnumMappingStrategy = EnumMappingStrategy.ByName)]     // ByName (default) | ByValue
+public partial class UserMapper
+{
+    public partial UserDto ToDto(User user);
+}
+```
+
+Set `UnmappedMemberBehavior = UnmappedMemberBehavior.Error` to make an accidental un-mapped
+property **fail the build** — turning a whole class of silent runtime bugs into compile errors.
+
+## Diagnostics
+
+| ID       | Meaning                                                            |
+| -------- | ----------------------------------------------------------------- |
+| `MPZ001` | A target member has no matching source member (warning or error). |
+| `MPZ002` | A source and target member exist but no conversion is possible.   |
+| `MPZ003` | A mapping method has an unsupported signature.                    |
+| `MPZ004` | The mapper type is generic or nested (not supported).             |
+
+## Performance
+
+Mapping is generated as direct assignments, so throughput matches hand-written code and there is
+**no startup cost**. Indicative in-process measurements (.NET 8, single object with a nested
+object + a 10-item list; run `dotnet run -c Release --project benchmarks/Mapperize.Benchmarks -- --quick`):
+
+| Mapper                    | Time       | Allocated |
+| ------------------------- | ---------- | --------- |
+| Hand-written              | ~250 ns    | 776 B     |
+| **Mapperize**             | **~246 ns**| **792 B** |
+| AutoMapper                | ~335 ns    | 896 B     |
+
+Mapperize is on par with hand-written code, ~25–30% faster than AutoMapper on single-object maps,
+and allocates less in every scenario measured. For rigorous, isolated numbers run the full
+[BenchmarkDotNet](https://benchmarkdotnet.org) suite:
+
+```bash
+dotnet run -c Release --project benchmarks/Mapperize.Benchmarks
+```
+
+## Security
+
+- **No runtime reflection**, no dynamic code generation, no expression compilation — nothing to
+  exploit or to break under trimming/AOT.
+- **Deterministic, auditable output**: the mapping code is committed-grade C# you can read and diff.
+- For contrast, the AutoMapper version used in the benchmark project (`13.0.1`) carries a
+  published high-severity advisory ([GHSA-rvv3-g6hj-g44x](https://github.com/advisories/GHSA-rvv3-g6hj-g44x)).
+  Mapperize ships **zero runtime dependencies**, so its supply-chain surface is minimal.
+
+## How it works
+
+`Mapperize` is a single NuGet package that contains two things:
+
+1. A tiny **runtime** assembly with the attributes (`[Mapper]`, `[MapProperty]`, …).
+2. A **Roslyn incremental source generator** (shipped under `analyzers/`) that implements your
+   `partial` methods during compilation.
+
+There is no runtime engine — after compilation the attributes aren’t even needed.
+
+## Building & testing
+
+```bash
+dotnet build -c Release          # build everything
+dotnet test  -c Release          # run the xUnit suite
+dotnet run   -c Release --project samples/Mapperize.Sample   # runnable feature tour
+```
+
+## Roadmap
+
+- User-defined member expressions / value converters
+- Flattening (`Order.Customer.Name` → `CustomerName`)
+- `before`/`after` mapping hooks
+- Deep-copy option for same-type nested references
+- Mapping to an existing instance (`void Update(Source, Target)`)
+
+Contributions welcome — see the issues on GitHub.
+
+## License
+
+MIT © 2026 Hovhannes Stepanyan. See [LICENSE](LICENSE).
