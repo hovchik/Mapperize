@@ -14,6 +14,7 @@ dotnet run --project samples/examples/<name>
 | [`Example.Extension`](Example.Extension)                             | Extension methods (`this` on the source) for fluent `source.ToDto()` calls.        |
 | [`Example.Update`](Example.Update)                                   | Mapping **into an existing instance** (`void`/fluent `Update`); init-only members are left alone. |
 | [`Example.DependencyInjection`](Example.DependencyInjection)         | `services.AddMapperize()` plus a generated interface injected into a service.      |
+| [`Example.ComplexTypes`](Example.ComplexTypes)                       | Complex types — null-safe flattening, user-defined value converters, and tuples.   |
 
 For a single program that exercises every feature at once, see
 [`../Mapperize.Sample`](../Mapperize.Sample).

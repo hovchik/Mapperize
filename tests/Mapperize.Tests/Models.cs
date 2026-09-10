@@ -105,3 +105,76 @@ public class CatalogDto
 {
     public Dictionary<string, OrderDto> Items { get; set; } = new();
 }
+
+// ---- flattening models ----
+public class Customer
+{
+    public string Name { get; set; } = "";
+    public int LoyaltyPoints { get; set; }
+    public Address HomeAddress { get; set; } = new();
+}
+
+public class OrderWithCustomer
+{
+    public int Id { get; set; }
+    public Customer Customer { get; set; } = new();
+}
+
+public class FlatOrderDto
+{
+    public int Id { get; set; }
+    public string CustomerName { get; set; } = "";                // flatten: Customer.Name
+    public int CustomerLoyaltyPoints { get; set; }                // flatten: Customer.LoyaltyPoints
+    public string CustomerHomeAddressCity { get; set; } = "";     // deep flatten: Customer.HomeAddress.City
+}
+
+public class NullableChainDto
+{
+    public int Id { get; set; }
+    public string CustomerName { get; set; } = "";
+}
+
+public class NodeSource
+{
+    public string Label { get; set; } = "";
+    public Address? Location { get; set; }        // nullable reference in the chain
+}
+
+public class NodeDto
+{
+    public string Label { get; set; } = "";
+    public string? LocationCity { get; set; }     // flatten through a nullable link
+}
+
+// explicit dotted-path target
+public class BuyerDto
+{
+    public int Id { get; set; }
+    public string Buyer { get; set; } = "";       // <- Customer.Name via [MapProperty]
+}
+
+// ---- custom value-converter models ----
+public class Event
+{
+    public string Title { get; set; } = "";
+    public System.DateTime When { get; set; }
+    public int Priority { get; set; }
+}
+
+public class EventDto
+{
+    public string Title { get; set; } = "";
+    public string When { get; set; } = "";        // DateTime -> string via a user converter
+    public string Priority { get; set; } = "";    // int -> string via a user converter
+}
+
+// ---- tuple models ----
+public class TupleHolder
+{
+    public (int Id, string Name) Person { get; set; }
+}
+
+public class TupleHolderDto
+{
+    public PersonRecord Person { get; set; } = new(0, "");
+}

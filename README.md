@@ -159,6 +159,75 @@ The `AddMapperize()` extension is generated **only** when the DI package is refe
 core Mapperize package stays dependency-free for everyone else. The interface and the concrete type
 resolve to the same instance, so a `Singleton` mapper is shared between both.
 
+## Complex types
+
+Mapperize maps rich object graphs without any hand-written plumbing.
+
+### Flattening
+
+A flat target member is resolved from a **nested source path** automatically — the generator walks
+the source graph to find a chain of members whose names concatenate to the target name. Every hop
+is null-safe: a `null` (or empty nullable) anywhere in the chain yields the target's default value
+instead of throwing.
+
+```csharp
+public class Order    { public Customer Customer { get; set; } }
+public class Customer { public string Name { get; set; } public Address HomeAddress { get; set; } }
+public class Address  { public string City { get; set; } }
+
+public class OrderDto
+{
+    public string CustomerName { get; set; }             // <- Customer.Name
+    public string CustomerHomeAddressCity { get; set; }  // <- Customer.HomeAddress.City
+}
+
+[Mapper]
+public partial class OrderMapper
+{
+    public partial OrderDto ToDto(Order order);
+}
+```
+
+When the flattened name is ambiguous or you'd rather be explicit, give `[MapProperty]` a **dotted
+source path**:
+
+```csharp
+[MapProperty("Customer.HomeAddress.City", "City")]
+public partial OrderDto ToDto(Order order);
+```
+
+### Value converters
+
+Need a conversion the generator doesn't know (say `DateTime` → `string`, or a domain-specific
+rule)? Just write an ordinary method on the mapper. Any `TTarget Method(TSource)` is picked up **by
+its signature** and used wherever that source/target pair is mapped — including inside nested
+objects and collections. A converter takes precedence over the built-in rules, so you can override
+them too.
+
+```csharp
+[Mapper]
+public partial class EventMapper
+{
+    public partial EventDto ToDto(Event e);
+
+    // used automatically wherever a DateTime maps to a string
+    private static string FormatDate(DateTime d) => d.ToString("O");
+}
+```
+
+### Tuples
+
+Named `ValueTuple`s map to and from objects by element name:
+
+```csharp
+[Mapper]
+public partial class PersonMapper
+{
+    public partial (int Id, string Name) ToTuple(Person person);
+    public partial Person FromTuple((int Id, string Name) value);
+}
+```
+
 ### The generated code
 
 The generator emits ordinary, readable C# (simplified):
@@ -190,6 +259,12 @@ public partial UserDto ToDto(User user)
 - **Renames** via `[MapProperty("Source", "Target")]`.
 - **Ignore** a target via `[MapperIgnoreTarget("Target")]`.
 - **Nested objects** — mapped recursively; helper methods are generated and de-duplicated.
+- **Flattening** — a flat target member (`CustomerHomeAddressCity`) is resolved from a nested
+  source path (`Customer.HomeAddress.City`) automatically, and null-safely; or spell it out with a
+  dotted `[MapProperty("Address.City", "City")]`. See [Complex types](#complex-types).
+- **Value converters** — write a plain `TTarget Method(TSource)` on the mapper and it is used
+  wherever that conversion is needed (and overrides the built-ins). See [Complex types](#complex-types).
+- **Tuples** — named `ValueTuple`s map to and from objects by element name.
 - **Collections** — `List<T>`, arrays, `HashSet<T>`, and the read-only/interface variants
   (`IEnumerable<T>`, `IReadOnlyList<T>`, `ICollection<T>`, …).
 - **Dictionaries** — `Dictionary<K,V>`, `IDictionary<K,V>`, `IReadOnlyDictionary<K,V>`; keys and
@@ -282,10 +357,12 @@ program for each usage style (instance, static, extension, update-in-place, depe
 
 ## Roadmap
 
-- User-defined member expressions / value converters
-- Flattening (`Order.Customer.Name` → `CustomerName`)
+- ~~User-defined value converters~~ ✅ shipped — see [Value converters](#value-converters)
+- ~~Flattening (`Order.Customer.Name` → `CustomerName`)~~ ✅ shipped — see [Flattening](#flattening)
+- ~~Tuple mapping~~ ✅ shipped — see [Tuples](#tuples)
 - `before`/`after` mapping hooks
 - Deep-copy option for same-type nested references
+- Unflattening (`CustomerName` → `Customer.Name`)
 
 Contributions welcome — see the issues on GitHub.
 

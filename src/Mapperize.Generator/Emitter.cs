@@ -30,6 +30,7 @@ internal sealed class Emitter
     private readonly Options _options;
 
     private readonly Dictionary<string, string> _mapMethods = new();   // signature -> method name
+    private readonly Dictionary<string, string> _converters = new();   // signature -> user converter method
     private readonly Queue<MapJob> _pending = new();
     private readonly HashSet<string> _emitted = new();
     private readonly List<Diagnostic> _diagnostics = new();
@@ -71,6 +72,8 @@ internal sealed class Emitter
         }
 
         // 1. Discover user-declared partial mapping methods and register them as reusable maps.
+        //    Ordinary (non-partial) methods that take one argument and return a value are collected
+        //    separately as user-defined value converters (see CollectConverters).
         var userMethods = new List<UserMethod>();
         foreach (var member in _mapper.GetMembers().OfType<IMethodSymbol>())
         {
@@ -99,6 +102,12 @@ internal sealed class Emitter
             return new MapperResult(hint, null, _diagnostics.ToImmutableArray(), null);
 
         _staticHelpers = _mapper.IsStatic || userMethods.Any(m => m.IsStatic);
+
+        // Custom value converters: any ordinary, fully-implemented `TTarget Method(TSource)` the user
+        // writes is used wherever a `TSource -> TTarget` conversion is needed (e.g. `string Format(
+        // DateTime)`). Collected after `_staticHelpers` is known so we can skip instance converters
+        // that a generated static helper could not legally call.
+        CollectConverters();
 
         // An interface (for injection / mocking) is generated only for a non-static, top-level
         // mapper that opted in and has at least one public instance mapping method.
@@ -214,6 +223,35 @@ internal sealed class Emitter
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Registers user-written value converters: ordinary, fully-implemented methods of the shape
+    /// <c>TTarget Method(TSource)</c> declared on the mapper. These are consulted by
+    /// <see cref="Convert"/> for the exact source/target pair before any built-in conversion, so a
+    /// user can override or supply a conversion the generator does not know how to synthesize.
+    /// </summary>
+    private void CollectConverters()
+    {
+        foreach (var member in _mapper.GetMembers().OfType<IMethodSymbol>())
+        {
+            if (member.MethodKind != MethodKind.Ordinary || member.IsGenericMethod)
+                continue;
+            // A partial mapping method (transform/update) is handled elsewhere; only ordinary,
+            // user-bodied methods act as converters.
+            if (member.IsPartialDefinition || member.PartialImplementationPart is not null)
+                continue;
+            if (member.Parameters.Length != 1 || member.ReturnsVoid || member.ReturnType.SpecialType == SpecialType.System_Void)
+                continue;
+            // A converter used from a generated static helper must itself be static.
+            if (_staticHelpers && !member.IsStatic)
+                continue;
+
+            var key = Key(member.Parameters[0].Type, member.ReturnType);
+            // First declaration wins; keeps behaviour deterministic if two converters collide.
+            if (!_converters.ContainsKey(key))
+                _converters[key] = member.Name;
+        }
     }
 
     private string Wrap(string bodies)
@@ -396,7 +434,7 @@ internal sealed class Emitter
                 // An update assigns after construction, so init-only members are unreachable here.
                 if (member.InitOnly)
                     continue;
-                var expr = ResolveMember(member.Name, member.Type, readable, srcName, um, tgtNamed, location);
+                var expr = ResolveMember(member.Name, member.Type, readable, srcName, um, tgtNamed, srcType, location);
                 if (expr is null)
                     continue; // diagnostic already reported by ResolveMember
                 sb.Append("            ").Append(tgtName).Append('.').Append(member.Name)
@@ -414,15 +452,43 @@ internal sealed class Emitter
         sb.AppendLine("        }");
     }
 
+    /// <summary>
+    /// Builds a target <c>ValueTuple</c> such as <c>(int Id, string Name)</c> as a positional literal,
+    /// resolving each element by its (friendly) name against the source — supporting renames, nested
+    /// objects, and flattening just like a class target.
+    /// </summary>
+    private string BuildTuple(INamedTypeSymbol tuple, ITypeSymbol sourceType, string accessor,
+        UserMethod? user, Location? location)
+    {
+        var readable = ReadableMembers(sourceType);
+        var parts = new List<string>();
+        foreach (var element in tuple.TupleElements)
+        {
+            if (user is not null && user.Ignores.Contains(element.Name))
+            {
+                parts.Add("default(" + Display(element.Type) + ")");
+                continue;
+            }
+            var expr = ResolveMember(element.Name, element.Type, readable, accessor, user, tuple, sourceType, location)
+                       ?? "default(" + Display(element.Type) + ")";
+            parts.Add(expr);
+        }
+        return "(" + string.Join(", ", parts) + ")";
+    }
+
     private string SignaturePrefix(Microsoft.CodeAnalysis.Accessibility accessibility, bool isStatic)
         => Accessibility(accessibility) + " " + (isStatic ? "static " : string.Empty) + "partial ";
 
     private string BuildConstruction(INamedTypeSymbol targetNamed, ITypeSymbol sourceType, string accessor,
         UserMethod? user, Location? location)
     {
+        // A tuple target is built as a positional literal; element names infer from the target type.
+        if (targetNamed.IsTupleType)
+            return BuildTuple(targetNamed, sourceType, accessor, user, location);
+
         var readable = ReadableMembers(sourceType);
         var settable = SettableMembers(targetNamed).ToList();
-        var ctor = ChooseConstructor(targetNamed, readable, user);
+        var ctor = ChooseConstructor(targetNamed, readable, sourceType, user);
 
         var ctorCovered = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
         var args = new List<string>();
@@ -431,7 +497,7 @@ internal sealed class Emitter
             foreach (var prm in ctor.Parameters)
             {
                 ctorCovered.Add(prm.Name);
-                var expr = ResolveMember(prm.Name, prm.Type, readable, accessor, user, targetNamed, location)
+                var expr = ResolveMember(prm.Name, prm.Type, readable, accessor, user, targetNamed, sourceType, location)
                            ?? "default(" + Display(prm.Type) + ")";
                 args.Add(expr);
             }
@@ -445,7 +511,7 @@ internal sealed class Emitter
             if (user is not null && user.Ignores.Contains(member.Name))
                 continue;
 
-            var expr = ResolveMember(member.Name, member.Type, readable, accessor, user, targetNamed, location);
+            var expr = ResolveMember(member.Name, member.Type, readable, accessor, user, targetNamed, sourceType, location);
             if (expr is null)
                 continue; // ResolveMember already reported the appropriate diagnostic
             inits.Add(member.Name + " = " + expr);
@@ -473,7 +539,7 @@ internal sealed class Emitter
     /// <summary>Resolves a target member/ctor-param to a source value expression, or null if unmapped.</summary>
     private string? ResolveMember(string targetName, ITypeSymbol targetType,
         Dictionary<string, ISymbol> readable, string accessor, UserMethod? user,
-        INamedTypeSymbol owner, Location? location)
+        INamedTypeSymbol owner, ITypeSymbol sourceRootType, Location? location)
     {
         var sourceName = targetName;
         if (user is not null)
@@ -488,30 +554,149 @@ internal sealed class Emitter
             }
         }
 
-        if (!TryFindMember(readable, sourceName, out var srcMember))
+        // Explicit dotted source path, e.g. [MapProperty("Address.City", "City")] — navigate it,
+        // producing a null-safe expression that walks the nested source members.
+        if (sourceName.IndexOf('.') >= 0)
         {
-            if (_options.UnmappedBehavior != UnmappedBehavior.Ignore)
-            {
-                var severity = _options.UnmappedBehavior == UnmappedBehavior.Error
-                    ? DiagnosticSeverity.Error
-                    : DiagnosticSeverity.Warning;
-                _diagnostics.Add(Diagnostic.Create(Diagnostics.UnmappedMember(severity), location,
-                    Display(owner), targetName));
-            }
+            var explicitExpr = ResolvePath(accessor, sourceRootType, SplitPath(sourceName), targetType);
+            if (explicitExpr is not null)
+                return explicitExpr;
+            ReportUnmapped(owner, targetName, location);
             return null;
         }
 
-        var srcMemberType = MemberType(srcMember);
-        var srcExpr = accessor + "." + srcMember.Name;
-        var conv = Convert(srcExpr, srcMemberType, targetType);
-        if (conv is null)
+        if (TryFindMember(readable, sourceName, out var srcMember))
         {
-            _diagnostics.Add(Diagnostic.Create(Diagnostics.NoConversion, location,
-                srcMember.Name, Display(srcMemberType), targetName, Display(targetType)));
-            return null;
+            var srcMemberType = MemberType(srcMember);
+            var srcExpr = accessor + "." + srcMember.Name;
+            var conv = Convert(srcExpr, srcMemberType, targetType);
+            if (conv is null)
+            {
+                _diagnostics.Add(Diagnostic.Create(Diagnostics.NoConversion, location,
+                    srcMember.Name, Display(srcMemberType), targetName, Display(targetType)));
+                return null;
+            }
+            return conv;
         }
-        return conv;
+
+        // Flattening: resolve `AddressCity` by walking `source.Address.City` through nested members.
+        var flattened = ResolveAutoFlatten(accessor, sourceRootType, sourceName, targetType);
+        if (flattened is not null)
+            return flattened;
+
+        ReportUnmapped(owner, targetName, location);
+        return null;
     }
+
+    private void ReportUnmapped(INamedTypeSymbol owner, string targetName, Location? location)
+    {
+        if (_options.UnmappedBehavior == UnmappedBehavior.Ignore)
+            return;
+        var severity = _options.UnmappedBehavior == UnmappedBehavior.Error
+            ? DiagnosticSeverity.Error
+            : DiagnosticSeverity.Warning;
+        _diagnostics.Add(Diagnostic.Create(Diagnostics.UnmappedMember(severity), location,
+            Display(owner), targetName));
+    }
+
+    // ---- flattening ---------------------------------------------------------
+
+    private static string[] SplitPath(string dotted) => dotted.Split('.');
+
+    /// <summary>
+    /// Auto-flattening: greedily decomposes a flat target name (e.g. <c>AddressCity</c>) into a chain
+    /// of nested source members (<c>Address</c> then <c>City</c>) and returns the null-safe accessor,
+    /// or null if no such chain exists.
+    /// </summary>
+    private string? ResolveAutoFlatten(string accessor, ITypeSymbol rootType, string name, ITypeSymbol targetType)
+    {
+        var path = new List<(string Name, ITypeSymbol Type)>();
+        var rootCore = NullableUnderlying(rootType) ?? rootType;
+        if (!BuildAutoPath(rootCore, name, path) || path.Count < 2)
+            return null;
+        return BuildGuardedPath(accessor, path, targetType);
+    }
+
+    private bool BuildAutoPath(ITypeSymbol type, string name, List<(string, ITypeSymbol)> path)
+    {
+        var readable = ReadableMembers(type);
+        // Longest member-name prefix first, so `AddressLine1` prefers a member `Address` over `A`.
+        var candidates = readable.Values
+            .Where(m => name.Length >= m.Name.Length && StartsWithName(name, m.Name))
+            .OrderByDescending(m => m.Name.Length)
+            .ToList();
+
+        foreach (var m in candidates)
+        {
+            var mType = MemberType(m);
+            if (m.Name.Length == name.Length)
+            {
+                path.Add((m.Name, mType));
+                return true;
+            }
+
+            var core = NullableUnderlying(mType) ?? mType;
+            path.Add((m.Name, mType));
+            if (BuildAutoPath(core, name.Substring(m.Name.Length), path))
+                return true;
+            path.RemoveAt(path.Count - 1);
+        }
+        return false;
+    }
+
+    /// <summary>Resolves an explicit segmented source path (case-insensitively unless configured otherwise).</summary>
+    private string? ResolvePath(string accessor, ITypeSymbol rootType, string[] segments, ITypeSymbol targetType)
+    {
+        var path = new List<(string, ITypeSymbol)>();
+        var current = NullableUnderlying(rootType) ?? rootType;
+        foreach (var segment in segments)
+        {
+            var readable = ReadableMembers(current);
+            if (!TryFindMember(readable, segment, out var member))
+                return null;
+            var mType = MemberType(member);
+            path.Add((member.Name, mType));
+            current = NullableUnderlying(mType) ?? mType;
+        }
+        return BuildGuardedPath(accessor, path, targetType);
+    }
+
+    /// <summary>
+    /// Builds a null-safe accessor over <paramref name="path"/> (a chain of source members). Each
+    /// intermediate reference type or nullable value type contributes a guard so a null anywhere in
+    /// the chain yields <c>default(TTarget)</c> instead of throwing.
+    /// </summary>
+    private string? BuildGuardedPath(string accessor, List<(string Name, ITypeSymbol Type)> path, ITypeSymbol targetType)
+    {
+        var guards = new List<string>();
+        var expr = accessor;
+        for (var i = 0; i < path.Count; i++)
+        {
+            var (name, type) = path[i];
+            expr += "." + name;
+            if (i == path.Count - 1)
+                break; // leaf: Convert handles its (possibly nullable) type below
+
+            var nullableCore = NullableUnderlying(type);
+            if (type.IsReferenceType || nullableCore is not null)
+                guards.Add(expr + " is null");
+            if (nullableCore is not null)
+                expr += ".Value"; // step through the nullable value type
+        }
+
+        var leafType = path[path.Count - 1].Type;
+        var conv = Convert(expr, leafType, targetType);
+        if (conv is null)
+            return null;
+        if (guards.Count == 0)
+            return conv;
+        return "(" + string.Join(" || ", guards) + ") ? default(" + Display(targetType) + ") : (" + conv + ")";
+    }
+
+    private bool StartsWithName(string name, string prefix)
+        => name.StartsWith(prefix, _options.CaseInsensitive
+            ? System.StringComparison.OrdinalIgnoreCase
+            : System.StringComparison.Ordinal);
 
     // ---- conversion engine --------------------------------------------------
 
@@ -519,6 +704,10 @@ internal sealed class Emitter
     {
         if (SymbolEqualityComparer.Default.Equals(sourceType, targetType))
             return expr;
+
+        // user-defined value converter for this exact pair takes precedence over any built-in rule
+        if (_converters.TryGetValue(Key(sourceType, targetType), out var converter))
+            return converter + "(" + expr + ")";
 
         // enums (including nullable enums)
         if (IsEnumLike(sourceType) && IsEnumLike(targetType))
@@ -674,7 +863,8 @@ internal sealed class Emitter
 
     // ---- symbol helpers -----------------------------------------------------
 
-    private IMethodSymbol? ChooseConstructor(INamedTypeSymbol type, Dictionary<string, ISymbol> readable, UserMethod? user)
+    private IMethodSymbol? ChooseConstructor(INamedTypeSymbol type, Dictionary<string, ISymbol> readable,
+        ITypeSymbol sourceRootType, UserMethod? user)
     {
         var ctors = type.InstanceConstructors
             .Where(c => c.DeclaredAccessibility is Microsoft.CodeAnalysis.Accessibility.Public or Microsoft.CodeAnalysis.Accessibility.Internal)
@@ -686,22 +876,27 @@ internal sealed class Emitter
 
         foreach (var c in ctors.OrderByDescending(c => c.Parameters.Length))
         {
-            if (c.Parameters.All(prm => CanResolve(prm.Name, prm.Type, readable, user)))
+            if (c.Parameters.All(prm => CanResolve(prm.Name, prm.Type, readable, sourceRootType, user)))
                 return c;
         }
         return ctors.OrderByDescending(c => c.Parameters.Length).FirstOrDefault();
     }
 
-    private bool CanResolve(string targetName, ITypeSymbol targetType, Dictionary<string, ISymbol> readable, UserMethod? user)
+    private bool CanResolve(string targetName, ITypeSymbol targetType, Dictionary<string, ISymbol> readable,
+        ITypeSymbol sourceRootType, UserMethod? user)
     {
         var sourceName = targetName;
         if (user is not null)
             foreach (var r in user.Renames)
                 if (NameEquals(r.Target, targetName)) { sourceName = r.Source; break; }
 
-        if (!TryFindMember(readable, sourceName, out var m))
-            return false;
-        return Convert("x", MemberType(m), targetType) is not null;
+        if (sourceName.IndexOf('.') >= 0)
+            return ResolvePath("x", sourceRootType, SplitPath(sourceName), targetType) is not null;
+
+        if (TryFindMember(readable, sourceName, out var m))
+            return Convert("x", MemberType(m), targetType) is not null;
+
+        return ResolveAutoFlatten("x", sourceRootType, sourceName, targetType) is not null;
     }
 
     private Dictionary<string, ISymbol> ReadableMembers(ITypeSymbol type)
@@ -727,6 +922,15 @@ internal sealed class Emitter
                         break;
                 }
             }
+        }
+
+        // Expose tuple elements by their friendly names (Id, Name, … or Item1, Item2, …) so a tuple
+        // can be a mapping source.
+        if (type is INamedTypeSymbol { IsTupleType: true } tuple)
+        {
+            foreach (var element in tuple.TupleElements)
+                if (!result.ContainsKey(element.Name))
+                    result[element.Name] = element;
         }
         return result;
     }

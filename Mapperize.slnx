@@ -11,6 +11,7 @@
     <Project Path="samples/examples/Example.Extension/Example.Extension.csproj" />
     <Project Path="samples/examples/Example.Update/Example.Update.csproj" />
     <Project Path="samples/examples/Example.DependencyInjection/Example.DependencyInjection.csproj" />
+    <Project Path="samples/examples/Example.ComplexTypes/Example.ComplexTypes.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Mapperize.Generator/Mapperize.Generator.csproj" />

@@ -49,9 +49,17 @@ public sealed class MapperAttribute : Attribute
 }
 
 /// <summary>
-/// Overrides the default name-based matching for a single member on a mapping method,
-/// or renames/ignores members. Apply it to the partial mapping method.
+/// Overrides the default name-based matching for a single member on a mapping method.
+/// Apply it to the partial mapping method to rename a member, or to map a target from a nested
+/// source path (flattening).
 /// </summary>
+/// <example>
+/// <code>
+/// [MapProperty("FullName", "Name")]              // rename
+/// [MapProperty("Customer.HomeAddress.City", "City")] // explicit flattening (dotted source path)
+/// public partial CustomerDto ToDto(Order order);
+/// </code>
+/// </example>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true, Inherited = false)]
 public sealed class MapPropertyAttribute : Attribute
 {
@@ -62,7 +70,10 @@ public sealed class MapPropertyAttribute : Attribute
         Target = target;
     }
 
-    /// <summary>The source member name.</summary>
+    /// <summary>
+    /// The source member name, or a dotted path into nested source members (e.g.
+    /// <c>"Address.City"</c>) to flatten a value from deeper in the source graph.
+    /// </summary>
     public string Source { get; }
 
     /// <summary>The target member name.</summary>

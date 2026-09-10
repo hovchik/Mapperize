@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Complex-type mapping.**
+  - **Flattening** — a flat target member is resolved from a nested source path automatically
+    (`CustomerHomeAddressCity` ← `Customer.HomeAddress.City`), walking the source graph and
+    guarding every reference/nullable hop so a `null` link yields the target default instead of
+    throwing. An explicit dotted source path is also supported:
+    `[MapProperty("Address.City", "City")]`.
+  - **User-defined value converters** — any ordinary `TTarget Method(TSource)` declared on the
+    mapper is used wherever that source/target pair is mapped (nested objects and collections
+    included), and takes precedence over the built-in conversions.
+  - **Tuple mapping** — named `ValueTuple`s map to and from objects (and other tuples) by element
+    name.
 - **More ways to declare mappers.** Mapping methods can now be:
   - `static` methods (call without constructing the mapper);
   - extension methods (`this` on the source parameter) for fluent `source.ToDto()` calls;

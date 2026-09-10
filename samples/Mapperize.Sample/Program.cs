@@ -44,6 +44,20 @@ Check("null source -> null", mapper.ToDto(null!) is null);
 Check("record via constructor", mapper.ToRecord(new Person { Id = 99, Name = "Grace" }) is { Id: 99, Name: "Grace" });
 Check("top-level collection", mapper.ToDtos(new List<User> { user, user }).Count == 2);
 
+// Complex types ---------------------------------------------------------------
+
+// Flattening: a nested source path (Address.City) collapses into a flat target member, null-safe.
+Check("flatten (Address.City -> AddressCity)", mapper.ToFlat(user).AddressCity == "London");
+Check("flatten null link -> default", mapper.ToFlat(new User { Id = 1 }).AddressCity is null);
+
+// Value converter: a plain method (DateTime -> string) is used wherever that conversion is needed.
+var eventDto = mapper.ToEventDto(new Event { Title = "Launch", When = new DateTime(2026, 9, 10) });
+Check("value converter (DateTime -> string)", eventDto.When == "2026-09-10");
+
+// Tuples: map an object to a named ValueTuple by element name.
+var tuple = mapper.ToTuple(new Person { Id = 7, Name = "Katherine" });
+Check("object -> named tuple", tuple is { Id: 7, Name: "Katherine" });
+
 // Alternative usage styles ---------------------------------------------------
 
 // 1. Extension method: call it fluently on the source value.
@@ -88,6 +102,18 @@ public partial class AppMapper
     [MapProperty(nameof(User.FullName), nameof(UserDto.Name))]
     [MapperIgnoreTarget(nameof(UserDto.SecretNote))]
     public partial UserDto Apply(User user, UserDto target);
+
+    // Flattening: AddressCity is resolved as user.Address.City (any depth, null-safe).
+    [MapperIgnoreTarget(nameof(UserFlatDto.Name))]
+    public partial UserFlatDto ToFlat(User user);
+
+    // Value converter: any `TTarget Method(TSource)` on the mapper is used for that pair.
+    public partial EventDto ToEventDto(Event source);
+    private static string Iso(DateTime value)
+        => value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    // Object -> named tuple, matched by element name.
+    public partial (int Id, string Name) ToTuple(Person person);
 }
 
 // A static class of mapping methods: call them statically or as extension methods.
@@ -139,3 +165,9 @@ public class UserDto
 
 public class Person { public int Id { get; set; } public string Name { get; set; } = ""; }
 public record PersonRecord(int Id, string Name);
+
+// Flattening target: AddressCity <- Address.City. Name is ignored (no flat equivalent).
+public class UserFlatDto { public int Id { get; set; } public string Name { get; set; } = ""; public string? AddressCity { get; set; } }
+
+public class Event { public string Title { get; set; } = ""; public DateTime When { get; set; } }
+public class EventDto { public string Title { get; set; } = ""; public string When { get; set; } = ""; }
